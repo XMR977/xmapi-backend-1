@@ -2,25 +2,29 @@ package com.yupi.project.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+
+
+import com.google.gson.Gson;
+import com.xmr.xmapicilentsdk.client.XmApiClient;
 import com.yupi.project.annotation.AuthCheck;
-import com.yupi.project.common.BaseResponse;
-import com.yupi.project.common.DeleteRequest;
-import com.yupi.project.common.ErrorCode;
-import com.yupi.project.common.ResultUtils;
+import com.yupi.project.common.*;
 import com.yupi.project.constant.CommonConstant;
 import com.yupi.project.exception.BusinessException;
 
 import com.yupi.project.model.dto.interfaceinfo.InterfaceInfoAddRequest;
+import com.yupi.project.model.dto.interfaceinfo.InterfaceInfoInvokerRequest;
 import com.yupi.project.model.dto.interfaceinfo.InterfaceInfoQueryRequest;
 import com.yupi.project.model.dto.interfaceinfo.InterfaceInfoUpdateRequest;
 import com.yupi.project.model.entity.InterfaceInfo;
 import com.yupi.project.model.entity.User;
 
+import com.yupi.project.model.enums.InterfaceInfoStatusEnum;
 import com.yupi.project.service.InterfaceInfoService;
 import com.yupi.project.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
+import org.springframework.context.annotation.Import;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
@@ -28,14 +32,14 @@ import javax.servlet.http.HttpServletRequest;
 import java.util.List;
 
 /**
- * 帖子接口
+ * 接口
  *
- * @author <a href="https://github.com/liyupi">程序员鱼皮</a>
- * @from <a href="https://yupi.icu">编程导航知识星球</a>
+ *
  */
 @RestController
 @RequestMapping("/interfaceInfo")
 @Slf4j
+
 public class InterfaceInfoController {
 
     @Resource
@@ -43,6 +47,9 @@ public class InterfaceInfoController {
 
     @Resource
     private UserService userService;
+
+    @Resource
+    private XmApiClient xmapiClient;
 
     // region 增删改查
 
@@ -197,4 +204,102 @@ public class InterfaceInfoController {
         return ResultUtils.success(interfaceInfoPage);
     }
 
+    /**
+     * publish
+     *
+     * @param idRequest
+     * @param request
+     * @return
+     */
+    @PostMapping("/online")
+    @AuthCheck(mustRole = "admin")
+    public BaseResponse<Boolean> onlineInterfaceInfo(@RequestBody IDRequest idRequest,
+                                                     HttpServletRequest request) {
+        if(idRequest == null || idRequest.getId() <= 0){
+            throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        }
+        Long id = idRequest.getId();
+        // 判断是否存在
+        InterfaceInfo oldInterfaceInfo = interfaceInfoService.getById(id);
+        if (oldInterfaceInfo == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR);
+        }
+        //verify api availability
+        com.xmr.xmapicilentsdk.model.User user = new com.xmr.xmapicilentsdk.model.User();
+        user.setUsername("test");
+        String usernameByPost = xmapiClient.getUsernameByPost(user);
+        if(StringUtils.isBlank(usernameByPost)){
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "API is not available");
+        }
+
+        // 仅本人或管理员可修改
+        InterfaceInfo interfaceInfo = new InterfaceInfo();
+        interfaceInfo.setId(id);
+        interfaceInfo.setStatus(InterfaceInfoStatusEnum.ONLINE.getValue());
+        boolean result = interfaceInfoService.updateById(interfaceInfo);
+        return ResultUtils.success(result);
+    }
+
+    /**
+     * offline
+     *
+     * @param idRequest
+     * @param request
+     * @return
+     */
+    @PostMapping("/offline")
+    @AuthCheck(mustRole = "admin")
+    public BaseResponse<Boolean> offlineInterfaceInfo(@RequestBody IDRequest idRequest,
+                                                     HttpServletRequest request) {
+        if(idRequest == null || idRequest.getId() <= 0){
+            throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        }
+        Long id = idRequest.getId();
+        // 判断是否存在
+        InterfaceInfo oldInterfaceInfo = interfaceInfoService.getById(id);
+        if (oldInterfaceInfo == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR);
+        }
+
+        // 仅本人或管理员可修改
+        InterfaceInfo interfaceInfo = new InterfaceInfo();
+        interfaceInfo.setId(id);
+        interfaceInfo.setStatus(InterfaceInfoStatusEnum.OFFLINE.getValue());
+        boolean result = interfaceInfoService.updateById(interfaceInfo);
+        return ResultUtils.success(result);
+    }
+
+    /**
+     * offline
+     *
+     * @param interfaceInfoInvokerRequest
+     * @param request
+     * @return
+     */
+    @PostMapping("/invoker")
+    public BaseResponse<Object> invokerInterfaceInfo(@RequestBody InterfaceInfoInvokerRequest interfaceInfoInvokerRequest,
+                                                      HttpServletRequest request) {
+        if(interfaceInfoInvokerRequest == null || interfaceInfoInvokerRequest.getId() <= 0){
+            throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        }
+        Long id = interfaceInfoInvokerRequest.getId();
+        String userRequestParams = interfaceInfoInvokerRequest.getUserRequestParams();
+        // 判断是否存在
+        InterfaceInfo oldInterfaceInfo = interfaceInfoService.getById(id);
+        if (oldInterfaceInfo == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR);
+        }
+        if (oldInterfaceInfo.getStatus() == InterfaceInfoStatusEnum.OFFLINE.getValue()) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR," API OFFLINE");
+        }
+        User loginuser = userService.getLoginUser(request);
+        String accessKey = loginuser.getAccessKey();
+        String secretKey = loginuser.getSecretKey();
+        XmApiClient tempxmApiClient = new XmApiClient(accessKey,secretKey);
+        Gson gson = new Gson();
+        com.xmr.xmapicilentsdk.model.User user = gson.fromJson(userRequestParams, com.xmr.xmapicilentsdk.model.User.class);
+        String usernameByPost = tempxmApiClient.getUsernameByPost(user);
+
+        return ResultUtils.success(usernameByPost);
+    }
 }
